@@ -640,6 +640,24 @@ Item {
   }
   readonly property string animStateFile: Quickshell.env("XDG_RUNTIME_DIR") + "/caption-buttons-anim"
 
+  Timer {
+    id: animRestoreTimer
+    interval: 400
+    onTriggered: {
+      if (root.dragAddress !== "") return
+      root.animOriginal = ""
+      root.animations(false)
+    }
+  }
+
+  // Layer surfaces (titlebars, follower, flyout) should appear and move
+  // without Hyprland's fade/slide animation.
+  Process {
+    id: layerRule
+    command: ["hyprctl", "eval", "hl.layer_rule({ match = { namespace = \"caption-buttons.*\" }, no_anim = true, animation = \"none\" })"]
+  }
+  Component.onCompleted: layerRule.running = true
+
   // Safety net: never leave animations off if a gesture ends abnormally.
   Timer {
     interval: 5000
@@ -661,6 +679,7 @@ Item {
     root.ghostX = info.winX
     root.ghostY = info.winY - (info.bar ? root.barH : 0)
     root.ghostMon = info.mon
+    animRestoreTimer.stop()
     root.focusWindow(info.address)
     // Nothing moves until the pointer travels a few pixels, so a plain click
     // or double-click on a maximized titlebar leaves the window alone.
@@ -719,10 +738,8 @@ Item {
     root.dragAddress = ""
     root.dragCtx = null
     root.ghostInfo = null
-    if (root.animOriginal === "off") {
-      root.animOriginal = ""
-      root.animations(false)
-    }
+    // Let the final move/snap land without animation, then bring them back.
+    if (root.animOriginal === "off") animRestoreTimer.restart()
     if (zone) root.applySnap(d.info, zone, gx, gy)
     Qt.callLater(root.poll)
   }

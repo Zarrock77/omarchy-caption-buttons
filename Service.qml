@@ -577,7 +577,7 @@ Item {
   property var dragCtx: null
 
   Timer {
-    interval: 16
+    interval: 8
     repeat: true
     running: root.dragAddress !== ""
     onTriggered: {
@@ -864,34 +864,33 @@ Item {
   // ---------------------------------------------------- titlebar follower
 
   // The real titlebar surface is frozen while it holds the pointer grab, so a
-  // visual-only copy follows the window live.
+  // visual-only copy follows the window live. It is drawn inside a full-screen
+  // transparent surface per monitor: moving a rectangle is just a repaint,
+  // far cheaper than resizing a layer surface on every pointer event, and it
+  // naturally crosses from one monitor to the next.
   Instantiator {
-    model: ScriptModel { values: root.ghostInfo && root.ghostInfo.bar && (root.dragMoved || root.settling !== "") ? [root.ghostInfo] : []; objectProp: "address" }
+    model: Quickshell.screens
 
     delegate: PanelWindow {
       id: ghost
       required property var modelData
-      readonly property var mon: root.monitorByName(root.ghostMon)
-      readonly property real left: mon ? root.ghostX - mon.x : 0
-      readonly property real clipLeft: Math.max(0, -left)
+      readonly property var info: root.ghostInfo
+      readonly property bool active: info !== null && info.bar && (root.dragMoved || root.settling !== "")
 
-      screen: root.screenByName(root.ghostMon)
-      visible: mon !== null
+      screen: modelData
+      visible: active
       color: "transparent"
       exclusionMode: ExclusionMode.Ignore
       WlrLayershell.layer: WlrLayer.Top
       WlrLayershell.namespace: "caption-buttons-titlebar-follow"
-      anchors { top: true; left: true }
-      margins {
-        left: Math.max(0, Math.round(ghost.left))
-        top: ghost.mon ? Math.max(0, Math.round(root.ghostY - ghost.mon.y)) : 0
-      }
-      implicitWidth: Math.max(1, Math.round(root.ghostW - ghost.clipLeft))
-      implicitHeight: root.barH
+      anchors { top: true; bottom: true; left: true; right: true }
       mask: Region {}
 
       TopRounded {
-        anchors.fill: parent
+        x: root.ghostX - ghost.modelData.x
+        y: root.ghostY - ghost.modelData.y
+        width: root.ghostW
+        height: root.barH
         fill: Qt.rgba(root.cBg.r, root.cBg.g, root.cBg.b, root.barAlpha)
 
         Rectangle {
@@ -902,14 +901,14 @@ Item {
         }
 
         Text {
-          visible: root.cfg.showTitle && ghost.clipLeft === 0
+          visible: root.cfg.showTitle && ghost.info !== null
           anchors.left: parent.left
           anchors.leftMargin: 10
           anchors.right: parent.right
           anchors.rightMargin: 8 + ghostButtons.width
           anchors.verticalCenter: parent.verticalCenter
           elide: Text.ElideRight
-          text: ghost.modelData.title
+          text: ghost.info ? ghost.info.title : ""
           textFormat: Text.PlainText
           color: root.cFg
           opacity: 0.95

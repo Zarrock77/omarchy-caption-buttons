@@ -522,6 +522,7 @@ Item {
   }
 
   function applySnap(info, zone, gx, gy) {
+    root.log("applySnap maximize=" + !!zone.maximize + " zone=" + Math.round(zone.x) + "," + Math.round(zone.y) + " " + Math.round(zone.w) + "x" + Math.round(zone.h) + " clientMon=" + root.clientMonitorName(info.address) + " zoneMon=" + zone.mon)
     var offset = info.bar ? root.barH : 0
     if (zone.maximize) {
       if (root.clientMonitorName(info.address) !== zone.mon) root.moveToMonitor(info.address, zone.mon)
@@ -534,6 +535,37 @@ Item {
       root.moveTo(info.address, zone.x, zone.y + offset)
     }
     Qt.callLater(root.poll)
+  }
+
+  // ------------------------------------------------------------- logging
+
+  // Everything interesting is written to the journal with a WCLOG tag:
+  //   journalctl --user -f | grep WCLOG
+  function log(msg) { console.warn("WCLOG " + new Date().toISOString().substr(11, 12) + " " + msg) }
+  function stateLine() {
+    return "drag=" + root.dragAddress + " moved=" + root.dragMoved + " ready=" + root.dragReady +
+      " settling=" + root.settling + " flyoutMon=" + root.flyoutMon + " ghost=" + (root.ghostInfo ? root.ghostInfo.address : "-") +
+      " bars=" + root.bars.length + " pills=" + root.pills.length
+  }
+
+  // Forget any gesture in progress (used when a release never arrives).
+  function resetGesture(reason) {
+    root.log("resetGesture (" + reason + ") before: " + root.stateLine())
+    restoreTimer.stop()
+    settleTimer.stop()
+    root.snapZone = null
+    root.flyoutMon = ""
+    root.hoverCell = -1
+    root.hoverZone = -1
+    root.dragAddress = ""
+    root.dragCtx = null
+    root.ghostInfo = null
+    root.settling = ""
+    root.dragMoved = false
+    root.dragReady = true
+    root.animOriginal = ""
+    root.animations(false)
+    root.poll()
   }
 
   // ------------------------------------------------------- drag gestures
@@ -559,6 +591,8 @@ Item {
   }
   IpcHandler {
     target: "io.github.zarrock77.caption-buttons"
+    function state(): string { return root.stateLine() }
+    function reset(): string { root.resetGesture("ipc"); return "ok" }
     function simDrag(address: string, dx: int, dy: int): string {
       var entry = null
       for (var i = 0; i < root.bars.length; i++) if (root.bars[i].address === address) { entry = root.bars[i]; break }
@@ -616,6 +650,7 @@ Item {
       d.wx = x
       d.wy = y
       root.ghostW = w
+      root.log("restore from maximized: mon=" + info.mon + " a.x=" + a.x + " size=" + w + "x" + h + " pos=" + x + "," + y)
       root.pendingDirty = false
       root.dragReady = true
     }
@@ -669,6 +704,23 @@ Item {
     onTriggered: { root.animOriginal = ""; root.animations(false) }
   }
 
+  // Watchdog: a gesture whose release never arrived (surface destroyed, grab
+  // lost) must not leave the flyout and follower on screen forever.
+  property double lastPointerEvent: 0
+  Timer {
+    interval: 1000
+    repeat: true
+    running: root.dragAddress !== "" || root.settling !== "" || root.flyoutMon !== ""
+    onTriggered: {
+      var quiet = Date.now() - root.lastPointerEvent
+      if (root.settling !== "" && root.dragAddress === "" && quiet > 2000) root.resetGesture("settle stuck")
+      else if (root.dragAddress !== "" && !root.anyPressed() && quiet > 1500) root.resetGesture("no button held")
+    }
+  }
+  // Set by the surfaces' MouseAreas while a button is physically down.
+  property int pressedCount: 0
+  function anyPressed() { return root.pressedCount > 0 }
+
   // fx/fy: frozen surface position (monitor-local); mx/my: pointer in surface.
   function dragPress(info, fx, fy, mx, my) {
     root.dragCtx = { info: info, fx: fx, fy: fy, mx: mx, my: my, wx: info.winX, wy: info.winY,
@@ -682,6 +734,9 @@ Item {
     root.ghostX = info.winX
     root.ghostY = info.winY - (info.bar ? root.barH : 0)
     root.ghostMon = info.mon
+    root.log("press addr=" + info.address + " bar=" + info.bar + " maxed=" + info.maxed + " floating=" + info.floating +
+             " mon=" + info.mon + " win=" + info.winX + "," + info.winY + " " + info.winW + "x" + info.winH + " surf=" + fx + "," + fy +
+             " ptr=" + mx + "," + my + " | " + root.stateLine())
     animRestoreTimer.stop()
     root.focusWindow(info.address)
     // Nothing moves until the pointer travels a few pixels, so a plain click
@@ -691,6 +746,7 @@ Item {
 
   function beginMove(d) {
     var info = d.info
+    root.log("beginMove maxed=" + info.maxed + " floating=" + info.floating)
     if (info.maxed) {
       root.unmaximize(info.address)
       restoreTimer.restart()
@@ -703,6 +759,7 @@ Item {
   function dragMove(mx, my) {
     var d = root.dragCtx
     if (!d) return
+    root.lastPointerEvent = Date.now()
     root.pendingX = d.wx + (mx - d.mx)
     root.pendingY = d.wy + (my - d.my)
     root.pendingDirty = true
@@ -719,6 +776,7 @@ Item {
     // Follow the pointer across monitors so the window belongs to the screen
     // it ends up on (workspace, maximize, tiling all depend on that).
     if (root.dragReady && mon && d.curMon !== "" && mon.name !== d.curMon) {
+      root.log("follow pointer to " + mon.name + " pending=" + root.pendingX + "," + root.pendingY)
       d.curMon = mon.name
       root.moveToMonitor(d.info.address, mon.name)
     }
@@ -731,6 +789,7 @@ Item {
     id: settleTimer
     interval: 380
     onTriggered: {
+      root.log("settled | " + root.stateLine())
       root.settling = ""
       root.ghostInfo = null
       root.dragMoved = false
@@ -740,11 +799,14 @@ Item {
 
   function dragRelease(mx, my) {
     var d = root.dragCtx
-    if (!d) return
+    if (!d) { root.log("release ignored: no drag context | " + root.stateLine()); return }
     var gx = d.info.monX + d.fx + mx
     var gy = d.info.monY + d.fy + my
     var zone = root.zoneAt(gx, gy)
     var moved = root.dragMoved
+    root.log("release ptr=" + gx + "," + gy + " moved=" + moved + " ready=" + root.dragReady +
+             " zone=" + (zone ? (zone.mon + " " + Math.round(zone.x) + "," + Math.round(zone.y) + " " + Math.round(zone.w) + "x" + Math.round(zone.h) + (zone.maximize ? " max" : "")) : "none") +
+             " pending=" + root.pendingX + "," + root.pendingY)
     if (!zone && moved && root.dragReady) root.moveTo(d.info.address, root.pendingX, root.pendingY)
     root.snapZone = null
     root.flyoutMon = ""
@@ -817,6 +879,9 @@ Item {
           anchors.fill: parent
           preventStealing: true
           cursorShape: Qt.ArrowCursor
+          onPressedChanged: root.pressedCount = Math.max(0, root.pressedCount + (dragArea.pressed ? 1 : -1))
+          onCanceled: { root.log("titlebar mouse canceled"); root.dragRelease(mouseX, mouseY); bar.frozen = false }
+          Component.onDestruction: if (dragArea.pressed) { root.pressedCount = Math.max(0, root.pressedCount - 1); root.log("titlebar surface destroyed while pressed") }
           onPressed: function(mouse) {
             bar.frozenX = bar.modelData.px
             bar.frozenY = bar.modelData.py
@@ -991,6 +1056,9 @@ Item {
               hoverEnabled: true
               preventStealing: true
               cursorShape: Qt.SizeAllCursor
+              onPressedChanged: root.pressedCount = Math.max(0, root.pressedCount + (grip.pressed ? 1 : -1))
+              onCanceled: { root.log("grip mouse canceled"); root.dragRelease(mouseX, mouseY); pill.frozen = false }
+              Component.onDestruction: if (grip.pressed) { root.pressedCount = Math.max(0, root.pressedCount - 1); root.log("grip surface destroyed while pressed") }
               onPressed: function(mouse) {
                 pill.frozenX = pill.modelData.px
                 pill.frozenY = pill.modelData.py

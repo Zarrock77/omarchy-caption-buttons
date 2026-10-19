@@ -277,6 +277,17 @@ Item {
       nextHandles.push(Object.assign({}, base, { mon: hm.name, monX: hm.x, monY: hm.y, px: hx - hm.x, py: hy - hm.y,
         show: root.cfg.resizeHandle && !coveredHandle && w.fullscreen !== 1 }))
     }
+    // While a window is being dragged its surfaces must stay exactly as they
+    // are: recreating one (for instance when the window crosses to the other
+    // monitor) would drop the pointer grab and the release would never arrive.
+    var held = root.dragAddress
+    if (held !== "") {
+      var keep = function(list) { return list.filter(function(e) { return e.address === held }) }
+      var drop = function(list) { return list.filter(function(e) { return e.address !== held }) }
+      nextBars = drop(nextBars).concat(keep(root.bars))
+      nextPills = drop(nextPills).concat(keep(root.pills))
+      nextHandles = drop(nextHandles).concat(keep(root.handles))
+    }
     root.bars = nextBars
     root.handles = nextHandles
     root.pills = nextPills

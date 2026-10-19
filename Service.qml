@@ -221,13 +221,34 @@ Item {
         cls: w.class || w.initialClass || "", title: w.title || w.class || "",
         focused: w.focusHistoryID === 0, bar: useBar
       }
-      if (useBar) nextBars.push(Object.assign({ px: bx - m.x, py: by - m.y, show: !coveredBar }, base))
-      else nextPills.push(Object.assign({ px: px - m.x, py: py - m.y, show: !coveredPill }, base))
-      nextHandles.push(Object.assign({ px: hx - m.x, py: hy - m.y, show: root.cfg.resizeHandle && !coveredHandle && w.fullscreen !== 1 }, base))
+      if (useBar) {
+        // A window can straddle two monitors: draw one bar segment per monitor
+        // it touches. The title sits on the left-most segment, the buttons on
+        // the right-most one.
+        for (var mi = 0; mi < root.monitors.length; mi++) {
+          var sm = root.monitors[mi]
+          if (!root.screenByName(sm.name)) continue
+          var ss = root.logicalSize(sm)
+          var x0 = Math.max(bx, sm.x), x1 = Math.min(bx + w.size[0], sm.x + ss.w)
+          if (x1 - x0 < 1 || by + root.barH <= sm.y || by >= sm.y + ss.h) continue
+          nextBars.push(Object.assign({}, base, {
+            key: w.address + "@" + sm.name, mon: sm.name, monX: sm.x, monY: sm.y,
+            px: x0 - sm.x, py: by - sm.y, segW: x1 - x0,
+            hasLeft: bx >= sm.x - 0.5, hasRight: bx + w.size[0] <= sm.x + ss.w + 0.5,
+            show: !coveredBar
+          }))
+        }
+      } else {
+        var pm = root.monitorAt(px, py) || m
+        nextPills.push(Object.assign({}, base, { mon: pm.name, monX: pm.x, monY: pm.y, px: px - pm.x, py: py - pm.y, show: !coveredPill }))
+      }
+      var hm = root.monitorAt(hx + 8, hy + 8) || m
+      nextHandles.push(Object.assign({}, base, { mon: hm.name, monX: hm.x, monY: hm.y, px: hx - hm.x, py: hy - hm.y,
+        show: root.cfg.resizeHandle && !coveredHandle && w.fullscreen !== 1 }))
     }
-    root.pills = nextPills
     root.bars = nextBars
     root.handles = nextHandles
+    root.pills = nextPills
   }
 
   // One-window groups ------------------------------------------------------
@@ -529,7 +550,7 @@ Item {
   // ------------------------------------------------------------- titlebars
 
   Instantiator {
-    model: ScriptModel { values: root.bars; objectProp: "address" }
+    model: ScriptModel { values: root.bars; objectProp: "key" }
 
     delegate: PanelWindow {
       id: bar
@@ -551,7 +572,7 @@ Item {
         left: Math.max(0, Math.round(bar.frozen ? bar.frozenX : bar.modelData.px))
         top: Math.max(0, Math.round(bar.frozen ? bar.frozenY : bar.modelData.py))
       }
-      implicitWidth: Math.max(1, bar.modelData.winW)
+      implicitWidth: Math.max(1, Math.round(bar.modelData.segW))
       implicitHeight: root.barH
 
       Rectangle {
@@ -586,11 +607,11 @@ Item {
         }
 
         Text {
-          visible: root.cfg.showTitle
+          visible: root.cfg.showTitle && bar.modelData.hasLeft
           anchors.left: parent.left
           anchors.leftMargin: 10
-          anchors.right: buttons.left
-          anchors.rightMargin: 8
+          anchors.right: parent.right
+          anchors.rightMargin: 8 + (bar.modelData.hasRight ? buttons.width : 0)
           anchors.verticalCenter: parent.verticalCenter
           elide: Text.ElideRight
           text: bar.modelData.title
@@ -602,6 +623,7 @@ Item {
 
         Row {
           id: buttons
+          visible: bar.modelData.hasRight
           anchors.right: parent.right
           anchors.top: parent.top
           anchors.bottom: parent.bottom

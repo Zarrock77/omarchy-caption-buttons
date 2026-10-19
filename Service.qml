@@ -350,8 +350,44 @@ Item {
     Qt.callLater(root.poll)
   }
 
+  // Hyprland does not reassign a floating window to another monitor when it is
+  // moved by dispatcher, so maximizing would fill the screen it *came from*.
+  // Keep the window's monitor in step with where it actually is.
+  function clientMonitorName(address) {
+    for (var i = 0; i < root.clients.length; i++) {
+      if (root.clients[i].address !== address) continue
+      var m = root.monitorById(root.clients[i].monitor)
+      return m ? m.name : ""
+    }
+    return ""
+  }
+
+  function moveToMonitor(address, name) {
+    dispatch("hl.dsp.window.move({ monitor = \"" + name + "\", " + target(address) + " })")
+  }
+
   function toggleMaximize(info) {
+    var center = root.monitorAt(info.winX + info.winW / 2, info.winY + info.winH / 2)
+    if (center && center.name !== root.clientMonitorName(info.address) && !info.maxed) {
+      var x = info.winX, y = info.winY
+      root.moveToMonitor(info.address, center.name)
+      Qt.callLater(function() { root.moveTo(info.address, x, y) })
+      maximizeTimer.pending = info
+      maximizeTimer.restart()
+      return
+    }
     dispatch("hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"toggle\", layout_aware = false, " + target(info.address) + " })")
+  }
+
+  Timer {
+    id: maximizeTimer
+    property var pending: null
+    interval: 140
+    onTriggered: {
+      if (!pending) return
+      root.dispatch("hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"toggle\", layout_aware = false, " + root.target(pending.address) + " })")
+      pending = null
+    }
   }
 
   function closeWindow(info) {
@@ -468,11 +504,20 @@ Item {
     return root.snapFor(gx, gy)
   }
 
+  Timer {
+    id: maximizeSetTimer
+    property string address: ""
+    interval: 140
+    onTriggered: root.dispatch("hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"set\", layout_aware = false, " + root.target(address) + " })")
+  }
+
   function applySnap(info, zone, gx, gy) {
     var offset = info.bar ? root.barH : 0
     if (zone.maximize) {
+      if (root.clientMonitorName(info.address) !== zone.mon) root.moveToMonitor(info.address, zone.mon)
       root.moveTo(info.address, gx - 120, gy - 12 + offset)
-      Qt.callLater(function() { root.dispatch("hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"set\", layout_aware = false, " + root.target(info.address) + " })") })
+      maximizeSetTimer.address = info.address
+      maximizeSetTimer.restart()
     } else {
       // The zone covers bar + window, so the client area starts below the bar.
       root.resizeTo(info.address, zone.w, zone.h - offset)
@@ -535,6 +580,7 @@ Item {
   // fx/fy: frozen surface position (monitor-local); mx/my: pointer in surface.
   function dragPress(info, fx, fy, mx, my) {
     root.dragCtx = { info: info, fx: fx, fy: fy, mx: mx, my: my, wx: info.winX, wy: info.winY,
+                     curMon: root.clientMonitorName(info.address),
                      gx0: info.monX + fx + mx, gy0: info.monY + fy + my }
     root.dragAddress = info.address
     root.pendingDirty = false
@@ -568,6 +614,12 @@ Item {
     }
     var gx = d.info.monX + d.fx + mx, gy = d.info.monY + d.fy + my
     var mon = root.monitorAt(gx, gy)
+    // Follow the pointer across monitors so the window belongs to the screen
+    // it ends up on (workspace, maximize, tiling all depend on that).
+    if (root.dragReady && mon && d.curMon !== "" && mon.name !== d.curMon) {
+      d.curMon = mon.name
+      root.moveToMonitor(d.info.address, mon.name)
+    }
     root.flyoutMon = root.dragMoved && root.cfg.snapLayouts && mon ? mon.name : ""
     root.snapZone = root.zoneAt(gx, gy)
   }

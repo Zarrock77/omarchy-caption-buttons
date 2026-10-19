@@ -44,6 +44,7 @@ Item {
     scale: 100,
     opacity: 88,
     snap: true,
+    snapLayouts: true,
     snapEdge: 20,
     snapGap: 8
   })
@@ -325,6 +326,84 @@ Item {
     return zone
   }
 
+  // ----------------------------------------------- Windows 11 style layouts
+
+  // Zones are [x, y, w, h] fractions of the monitor work area.
+  readonly property var layouts: [
+    [[0, 0, .5, 1], [.5, 0, .5, 1]],
+    [[0, 0, .66, 1], [.66, 0, .34, 1]],
+    [[0, 0, .5, 1], [.5, 0, .5, .5], [.5, .5, .5, .5]],
+    [[0, 0, .34, 1], [.34, 0, .66, 1]],
+    [[0, 0, 1, .5], [0, .5, 1, .5]],
+    [[0, 0, .333, 1], [.333, 0, .334, 1], [.667, 0, .333, 1]],
+    [[0, 0, .5, .5], [0, .5, .5, .5], [.5, 0, .5, 1]],
+    [[0, 0, .5, .5], [.5, 0, .5, .5], [0, .5, .5, .5], [.5, .5, .5, .5]],
+    [[0, 0, .25, 1], [.25, 0, .5, 1], [.75, 0, .25, 1]]
+  ]
+  readonly property int flyCell: 112
+  readonly property int flyCellH: 70
+  readonly property int flyGap: 10
+  readonly property int flyPad: 14
+  readonly property int flyW: flyPad * 2 + flyCell * 3 + flyGap * 2
+  readonly property int flyH: flyPad * 2 + flyCellH * 3 + flyGap * 2
+
+  property string flyoutMon: ""
+  property int hoverCell: -1
+  property int hoverZone: -1
+  property bool dragMoved: false
+
+  function flyoutRect(mon) {
+    var a = root.workArea(mon)
+    return { x: a.x + (a.w - root.flyW) / 2, y: a.y + 8, w: root.flyW, h: root.flyH }
+  }
+
+  function zoneRect(mon, f) {
+    var a = root.workArea(mon)
+    var g = root.snapGap
+    var x0 = a.x + g, y0 = a.y + g, W = a.w - 2 * g, H = a.h - 2 * g
+    var h = g / 2
+    var x = x0 + f[0] * W + (f[0] > 0 ? h : 0)
+    var y = y0 + f[1] * H + (f[1] > 0 ? h : 0)
+    var w = f[2] * W - (f[0] > 0 ? h : 0) - (f[0] + f[2] < 0.999 ? h : 0)
+    var hh = f[3] * H - (f[1] > 0 ? h : 0) - (f[1] + f[3] < 0.999 ? h : 0)
+    return { x: x, y: y, w: w, h: hh, mon: mon.name }
+  }
+
+  // Zone under the pointer: the layout flyout first, then screen edges.
+  function zoneAt(gx, gy) {
+    root.hoverCell = -1
+    root.hoverZone = -1
+    var mon = root.monitorAt(gx, gy)
+    if (!mon) return null
+    if (root.cfg.snapLayouts && root.dragMoved) {
+      var fr = root.flyoutRect(mon)
+      var lx = gx - fr.x - root.flyPad, ly = gy - fr.y - root.flyPad
+      if (gx >= fr.x && gx < fr.x + fr.w && gy >= fr.y && gy < fr.y + fr.h) {
+        var col = Math.floor(lx / (root.flyCell + root.flyGap))
+        var row = Math.floor(ly / (root.flyCellH + root.flyGap))
+        if (col >= 0 && col < 3 && row >= 0 && row < 3) {
+          var cx = lx - col * (root.flyCell + root.flyGap)
+          var cy = ly - row * (root.flyCellH + root.flyGap)
+          if (cx >= 0 && cx < root.flyCell && cy >= 0 && cy < root.flyCellH) {
+            var index = row * 3 + col
+            var zones = root.layouts[index]
+            for (var z = 0; z < zones.length; z++) {
+              var f = zones[z]
+              if (cx >= f[0] * root.flyCell && cx < (f[0] + f[2]) * root.flyCell
+                  && cy >= f[1] * root.flyCellH && cy < (f[1] + f[3]) * root.flyCellH) {
+                root.hoverCell = index
+                root.hoverZone = z
+                return root.zoneRect(mon, f)
+              }
+            }
+          }
+        }
+        return null
+      }
+    }
+    return root.snapFor(gx, gy)
+  }
+
   function applySnap(info, zone, gx, gy) {
     var offset = info.bar ? root.barH : 0
     if (zone.maximize) {
@@ -361,6 +440,7 @@ Item {
     root.dragCtx = { info: info, fx: fx, fy: fy, mx: mx, my: my, wx: info.winX, wy: info.winY }
     root.dragAddress = info.address
     root.pendingDirty = false
+    root.dragMoved = false
     root.focusWindow(info.address)
     if (info.maxed) root.unmaximize(info.address)
     if (!info.floating) root.floatOn(info.address)
@@ -372,7 +452,11 @@ Item {
     root.pendingX = d.wx + (mx - d.mx)
     root.pendingY = d.wy + (my - d.my)
     root.pendingDirty = true
-    root.snapZone = root.snapFor(d.info.monX + d.fx + mx, d.info.monY + d.fy + my)
+    if (!root.dragMoved && Math.abs(mx - d.mx) + Math.abs(my - d.my) > 6) root.dragMoved = true
+    var gx = d.info.monX + d.fx + mx, gy = d.info.monY + d.fy + my
+    var mon = root.monitorAt(gx, gy)
+    root.flyoutMon = root.dragMoved && root.cfg.snapLayouts && mon ? mon.name : ""
+    root.snapZone = root.zoneAt(gx, gy)
   }
 
   function dragRelease(mx, my) {
@@ -380,9 +464,12 @@ Item {
     if (!d) return
     var gx = d.info.monX + d.fx + mx
     var gy = d.info.monY + d.fy + my
-    var zone = root.snapFor(gx, gy)
+    var zone = root.zoneAt(gx, gy)
     if (!zone) root.moveTo(d.info.address, root.pendingX, root.pendingY)
     root.snapZone = null
+    root.flyoutMon = ""
+    root.hoverCell = -1
+    root.hoverZone = -1
     root.dragAddress = ""
     root.dragCtx = null
     if (zone) root.applySnap(d.info, zone, gx, gy)
@@ -653,6 +740,76 @@ Item {
           handle.frozen = false
           handle.active = false
           Qt.callLater(root.poll)
+        }
+      }
+    }
+  }
+
+  // ----------------------------------------------------- layout flyout
+
+  Instantiator {
+    model: Quickshell.screens
+
+    delegate: PanelWindow {
+      id: fly
+      required property var modelData
+      readonly property var mon: root.monitorByName(modelData.name)
+      readonly property var rect: mon ? root.flyoutRect(mon) : null
+
+      screen: modelData
+      visible: root.flyoutMon === modelData.name && rect !== null
+      color: "transparent"
+      exclusionMode: ExclusionMode.Ignore
+      WlrLayershell.layer: WlrLayer.Overlay
+      WlrLayershell.namespace: "caption-buttons-layouts"
+      anchors { top: true; left: true }
+      margins {
+        left: fly.rect ? Math.max(0, Math.round(fly.rect.x - fly.modelData.x)) : 0
+        top: fly.rect ? Math.max(0, Math.round(fly.rect.y - fly.modelData.y)) : 0
+      }
+      implicitWidth: root.flyW
+      implicitHeight: root.flyH
+      mask: Region {}
+
+      Rectangle {
+        anchors.fill: parent
+        radius: 14
+        color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.94)
+        border.width: 1
+        border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.25)
+
+        Repeater {
+          model: root.layouts
+
+          delegate: Item {
+            id: cell
+            required property var modelData
+            required property int index
+            x: root.flyPad + (index % 3) * (root.flyCell + root.flyGap)
+            y: root.flyPad + Math.floor(index / 3) * (root.flyCellH + root.flyGap)
+            width: root.flyCell
+            height: root.flyCellH
+
+            Repeater {
+              model: cell.modelData
+
+              delegate: Rectangle {
+                id: zoneBox
+                required property var modelData
+                required property int index
+                readonly property bool hot: root.hoverCell === cell.index && root.hoverZone === zoneBox.index
+                x: modelData[0] * cell.width + 1.5
+                y: modelData[1] * cell.height + 1.5
+                width: modelData[2] * cell.width - 3
+                height: modelData[3] * cell.height - 3
+                radius: 5
+                color: hot ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.55)
+                           : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.14)
+                border.width: 1
+                border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, hot ? 0.9 : 0.3)
+              }
+            }
+          }
         }
       }
     }

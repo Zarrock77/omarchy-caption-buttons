@@ -23,7 +23,7 @@ Panel {
   readonly property string configPath: Quickshell.env("HOME") + "/.config/omarchy/caption-buttons.json"
   readonly property var defaults: ({
     enabled: true, titlebar: true, showTitle: true, minimize: true, maximize: true, close: true, resizeHandle: true,
-    corner: "top-right", scale: 100, opacity: 88, snap: true, snapEdge: 20, snapGap: 8
+    corner: "top-right", scale: 100, opacity: 88, snap: true, snapLayouts: true, snapEdge: 20, snapGap: 8
   })
   property var values: root.defaults
 
@@ -174,6 +174,14 @@ Panel {
           checked: root.values.snap
           foreground: root.fg; fontFamily: root.font
           onClicked: root.set("snap", !root.values.snap)
+        }
+
+        Toggle {
+          width: parent.width; label: "Snap layouts menu"
+          description: "While dragging a window, a layout picker appears at the top of the screen"
+          checked: root.values.snapLayouts
+          foreground: root.fg; fontFamily: root.font
+          onClicked: root.set("snapLayouts", !root.values.snapLayouts)
         }
 
         Text { text: "Edge sensitivity: " + root.values.snapEdge + " px"; color: root.fg; font.family: root.font; font.pixelSize: Style.font.body; textFormat: Text.PlainText }

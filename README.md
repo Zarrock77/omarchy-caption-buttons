@@ -41,6 +41,14 @@ are not meaningful in this mode.
 | `✕` | Close |
 | `◢` (bottom-right) | Drag to resize |
 
+## Snap layouts menu
+
+Like Windows 11: press and hold on a titlebar (or the pill grip) and start dragging. A layout
+picker appears at the top of the screen; move the pointer over a zone and release to put the
+window there. Nine layouts: halves, 2/3 + 1/3, 1/3 + 2/3, stacked, thirds, a column next to two
+stacked windows (both ways), quadrants and 1/4 + 1/2 + 1/4. It can be switched off in the settings
+popup.
+
 ## Snap zones
 
 While dragging by the grip, a preview shows where the window will land when released:

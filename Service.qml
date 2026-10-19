@@ -260,7 +260,7 @@ Item {
   function target(address) { return "window = \"address:" + address + "\"" }
 
   function floatOn(address) { dispatch("hl.dsp.window.float({ action = \"on\", " + target(address) + " })") }
-  function unmaximize(address) { dispatch("hl.dsp.window.fullscreen({ action = \"unset\", layout_aware = false, " + target(address) + " })") }
+  function unmaximize(address) { dispatch("hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"unset\", layout_aware = false, " + target(address) + " })") }
   function moveTo(address, x, y) { dispatch("hl.dsp.window.move({ x = " + Math.round(x) + ", y = " + Math.round(y) + ", " + target(address) + " })") }
   function resizeTo(address, w, h) { dispatch("hl.dsp.window.resize({ x = " + Math.round(w) + ", y = " + Math.round(h) + ", exact = true, " + target(address) + " })") }
   function resizeBy(address, dx, dy) { dispatch("hl.dsp.window.resize({ x = " + Math.round(dx) + ", y = " + Math.round(dy) + ", relative = true, " + target(address) + " })") }

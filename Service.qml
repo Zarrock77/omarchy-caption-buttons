@@ -450,6 +450,12 @@ Item {
   property int hoverCell: -1
   property int hoverZone: -1
   property bool dragMoved: false
+  // Live position of the dragged titlebar (global coords) for the follower ghost.
+  property real ghostX: 0
+  property real ghostY: 0
+  property real ghostW: 0
+  property string ghostMon: ""
+  property var ghostInfo: null
 
   function flyoutRect(mon) {
     var a = root.workArea(mon)
@@ -572,6 +578,7 @@ Item {
       root.moveTo(info.address, x, y)
       d.wx = x
       d.wy = y
+      root.ghostW = w
       root.pendingDirty = false
       root.dragReady = true
     }
@@ -585,6 +592,11 @@ Item {
     root.dragAddress = info.address
     root.pendingDirty = false
     root.dragMoved = false
+    root.ghostInfo = info
+    root.ghostW = info.winW
+    root.ghostX = info.winX
+    root.ghostY = info.winY - (info.bar ? root.barH : 0)
+    root.ghostMon = info.mon
     root.focusWindow(info.address)
     // Nothing moves until the pointer travels a few pixels, so a plain click
     // or double-click on a maximized titlebar leaves the window alone.
@@ -608,6 +620,8 @@ Item {
     root.pendingX = d.wx + (mx - d.mx)
     root.pendingY = d.wy + (my - d.my)
     root.pendingDirty = true
+    root.ghostX = root.pendingX
+    root.ghostY = root.pendingY - (d.info.bar ? root.barH : 0)
     if (!root.dragMoved && Math.abs(mx - d.mx) + Math.abs(my - d.my) > 6) {
       root.dragMoved = true
       root.beginMove(d)
@@ -620,6 +634,7 @@ Item {
       d.curMon = mon.name
       root.moveToMonitor(d.info.address, mon.name)
     }
+    if (mon) root.ghostMon = mon.name
     root.flyoutMon = root.dragMoved && root.cfg.snapLayouts && mon ? mon.name : ""
     root.snapZone = root.zoneAt(gx, gy)
   }
@@ -637,6 +652,7 @@ Item {
     root.hoverZone = -1
     root.dragAddress = ""
     root.dragCtx = null
+    root.ghostInfo = null
     if (zone) root.applySnap(d.info, zone, gx, gy)
     Qt.callLater(root.poll)
   }
@@ -671,6 +687,7 @@ Item {
 
       Rectangle {
         anchors.fill: parent
+        opacity: bar.dragging && root.dragMoved ? 0 : 1
         color: Qt.rgba(root.cBg.r, root.cBg.g, root.cBg.b, root.barAlpha)
         border.width: 0
 
@@ -725,6 +742,81 @@ Item {
           CaptionButton { visible: root.cfg.minimize; glyph: "—"; onActivated: root.minimize(bar.modelData) }
           CaptionButton { visible: root.cfg.maximize; glyph: bar.modelData.maxed ? "❐" : "▢"; onActivated: root.toggleMaximize(bar.modelData) }
           CaptionButton { visible: root.cfg.close; glyph: "✕"; danger: true; onActivated: root.closeWindow(bar.modelData) }
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------- titlebar follower
+
+  // The real titlebar surface is frozen while it holds the pointer grab, so a
+  // visual-only copy follows the window live.
+  Instantiator {
+    model: ScriptModel { values: root.ghostInfo && root.ghostInfo.bar && root.dragMoved ? [root.ghostInfo] : []; objectProp: "address" }
+
+    delegate: PanelWindow {
+      id: ghost
+      required property var modelData
+      readonly property var mon: root.monitorByName(root.ghostMon)
+      readonly property real left: mon ? root.ghostX - mon.x : 0
+      readonly property real clipLeft: Math.max(0, -left)
+
+      screen: root.screenByName(root.ghostMon)
+      visible: mon !== null
+      color: "transparent"
+      exclusionMode: ExclusionMode.Ignore
+      WlrLayershell.layer: WlrLayer.Top
+      WlrLayershell.namespace: "caption-buttons-titlebar-follow"
+      anchors { top: true; left: true }
+      margins {
+        left: Math.max(0, Math.round(ghost.left))
+        top: ghost.mon ? Math.max(0, Math.round(root.ghostY - ghost.mon.y)) : 0
+      }
+      implicitWidth: Math.max(1, Math.round(root.ghostW - ghost.clipLeft))
+      implicitHeight: root.barH
+      mask: Region {}
+
+      Rectangle {
+        anchors.fill: parent
+        color: Qt.rgba(root.cBg.r, root.cBg.g, root.cBg.b, root.barAlpha)
+
+        Rectangle {
+          anchors.bottom: parent.bottom
+          width: parent.width
+          height: 1
+          color: Qt.rgba(root.cFg.r, root.cFg.g, root.cFg.b, 0.28)
+        }
+
+        Text {
+          visible: root.cfg.showTitle && ghost.clipLeft === 0
+          anchors.left: parent.left
+          anchors.leftMargin: 10
+          anchors.right: parent.right
+          anchors.rightMargin: 8 + ghostButtons.width
+          anchors.verticalCenter: parent.verticalCenter
+          elide: Text.ElideRight
+          text: ghost.modelData.title
+          textFormat: Text.PlainText
+          color: root.cFg
+          opacity: 0.95
+          font.pixelSize: Math.round(12 * root.uiScale)
+        }
+
+        Row {
+          id: ghostButtons
+          anchors.right: parent.right
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
+          Repeater {
+            model: [root.cfg.minimize ? "—" : "", root.cfg.maximize ? "▢" : "", root.cfg.close ? "✕" : ""]
+            delegate: Item {
+              required property string modelData
+              visible: modelData !== ""
+              width: visible ? root.buttonSize : 0
+              height: parent.height
+              Text { anchors.centerIn: parent; text: parent.modelData; color: root.cFg; font.pixelSize: Math.round(13 * root.uiScale) }
+            }
+          }
         }
       }
     }

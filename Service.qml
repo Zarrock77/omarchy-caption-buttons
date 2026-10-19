@@ -5,7 +5,6 @@ import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
-import qs.Commons
 
 // Caption Buttons.
 //
@@ -31,6 +30,38 @@ Item {
   readonly property int minWindowW: 260
   // Strip reserved by Hyprland: groupbar height (26) + indicator (1).
   readonly property int barH: 27
+
+  // Theme colors come straight from the current theme's colors.toml, so the
+  // plugin does not depend on the shell's Color singleton (which third-party
+  // plugins cannot rely on across Omarchy versions).
+  readonly property string themeColorsPath: Quickshell.env("HOME") + "/.local/state/omarchy/current/theme/colors.toml"
+  property color cBg: "#101315"
+  property color cFg: "#cacccc"
+  property color cAccent: "#798186"
+  property color cUrgent: "#a55555"
+
+  function parseColors(text) {
+    var found = {}
+    var lines = String(text).split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      var m = lines[i].match(/^\s*([a-z_]+)\s*=\s*"(#[0-9a-fA-F]{6})"/)
+      if (m) found[m[1]] = m[2]
+    }
+    if (found.background) root.cBg = found.background
+    if (found.foreground) root.cFg = found.foreground
+    if (found.accent) root.cAccent = found.accent
+    if (found.urgent) root.cUrgent = found.urgent
+    else if (found.color1) root.cUrgent = found.color1
+  }
+
+  FileView {
+    id: colorsFile
+    path: root.themeColorsPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.parseColors(text())
+    onFileChanged: colorsFile.reload()
+  }
 
   readonly property var defaults: ({
     enabled: true,
@@ -556,7 +587,7 @@ Item {
       id: bar
       required property var modelData
       readonly property bool dragging: root.dragAddress === modelData.address
-      readonly property color fg: Color.foreground
+      readonly property color fg: root.cFg
       property real frozenX: 0
       property real frozenY: 0
       property bool frozen: false
@@ -577,7 +608,7 @@ Item {
 
       Rectangle {
         anchors.fill: parent
-        color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, root.barAlpha)
+        color: Qt.rgba(root.cBg.r, root.cBg.g, root.cBg.b, root.barAlpha)
         border.width: 0
 
         Rectangle {
@@ -666,9 +697,9 @@ Item {
       Rectangle {
         anchors.fill: parent
         radius: 8
-        color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, root.barAlpha)
+        color: Qt.rgba(root.cBg.r, root.cBg.g, root.cBg.b, root.barAlpha)
         border.width: 1
-        border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.18)
+        border.color: Qt.rgba(root.cFg.r, root.cFg.g, root.cFg.b, 0.18)
 
         Row {
           anchors.fill: parent
@@ -681,7 +712,7 @@ Item {
             Text {
               anchors.centerIn: parent
               text: "⠿"
-              color: Color.foreground
+              color: root.cFg
               opacity: grip.pressed || grip.containsMouse ? 1 : 0.6
               font.pixelSize: Math.round(15 * root.uiScale)
             }
@@ -727,14 +758,14 @@ Item {
       anchors.fill: parent
       anchors.margins: 1
       radius: 6
-      color: button.danger ? Color.urgent : Color.foreground
+      color: button.danger ? root.cUrgent : root.cFg
       opacity: area.pressed ? 0.35 : (area.containsMouse ? 0.2 : 0)
     }
 
     Text {
       anchors.centerIn: parent
       text: button.glyph
-      color: area.containsMouse && button.danger ? Color.urgent : Color.foreground
+      color: area.containsMouse && button.danger ? root.cUrgent : root.cFg
       font.pixelSize: Math.round(13 * root.uiScale)
     }
 
@@ -780,7 +811,7 @@ Item {
         anchors.centerIn: parent
         text: "◢"
         font.pixelSize: 12
-        color: Color.foreground
+        color: root.cFg
         opacity: resizeArea.pressed || resizeArea.containsMouse ? 0.95 : 0.35
       }
 
@@ -846,9 +877,9 @@ Item {
       Rectangle {
         anchors.fill: parent
         radius: 14
-        color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.94)
+        color: Qt.rgba(root.cBg.r, root.cBg.g, root.cBg.b, 0.94)
         border.width: 1
-        border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.25)
+        border.color: Qt.rgba(root.cFg.r, root.cFg.g, root.cFg.b, 0.25)
 
         Repeater {
           model: root.layouts
@@ -875,10 +906,10 @@ Item {
                 width: modelData[2] * cell.width - 3
                 height: modelData[3] * cell.height - 3
                 radius: 5
-                color: hot ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.55)
-                           : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.14)
+                color: hot ? Qt.rgba(root.cAccent.r, root.cAccent.g, root.cAccent.b, 0.55)
+                           : Qt.rgba(root.cFg.r, root.cFg.g, root.cFg.b, 0.14)
                 border.width: 1
-                border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, hot ? 0.9 : 0.3)
+                border.color: Qt.rgba(root.cFg.r, root.cFg.g, root.cFg.b, hot ? 0.9 : 0.3)
               }
             }
           }
@@ -912,9 +943,9 @@ Item {
         width: preview.zone ? preview.zone.w : 0
         height: preview.zone ? preview.zone.h : 0
         radius: 10
-        color: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18)
+        color: Qt.rgba(root.cAccent.r, root.cAccent.g, root.cAccent.b, 0.18)
         border.width: 2
-        border.color: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.7)
+        border.color: Qt.rgba(root.cAccent.r, root.cAccent.g, root.cAccent.b, 0.7)
       }
     }
   }

@@ -535,6 +535,39 @@ Item {
 
   // ------------------------------------------------------- drag gestures
 
+  // Scripted drag for testing: `omarchy-shell shell call <id> simDrag <address> <dx> <dy>`.
+  property var sim: null
+  Timer {
+    id: simTimer
+    interval: 60
+    repeat: true
+    onTriggered: {
+      var t = root.sim
+      if (!t) { simTimer.stop(); return }
+      t.step += 1
+      if (t.step <= 10) {
+        root.dragMove(t.mx + t.dx * t.step / 10, t.my + t.dy * t.step / 10)
+      } else if (t.step === 14) {
+        root.dragRelease(t.mx + t.dx, t.my + t.dy)
+        root.sim = null
+        simTimer.stop()
+      }
+    }
+  }
+  IpcHandler {
+    target: "io.github.zarrock77.caption-buttons"
+    function simDrag(address: string, dx: int, dy: int): string {
+      var entry = null
+      for (var i = 0; i < root.bars.length; i++) if (root.bars[i].address === address) { entry = root.bars[i]; break }
+      if (!entry) for (var j = 0; j < root.pills.length; j++) if (root.pills[j].address === address) { entry = root.pills[j]; break }
+      if (!entry) return "no surface for " + address
+      root.sim = { step: 0, dx: dx, dy: dy, mx: 100, my: 10 }
+      root.dragPress(entry, entry.px, entry.py, 100, 10)
+      simTimer.restart()
+      return "ok"
+    }
+  }
+
   property real pendingX: 0
   property real pendingY: 0
   property bool pendingDirty: false
@@ -585,6 +618,36 @@ Item {
     }
   }
 
+  // Hyprland animates window moves and resizes, so the window would glide
+  // behind the pointer (and the titlebar follower). Animations are switched
+  // off for the duration of a drag and put back afterwards.
+  property string animOriginal: ""
+  Process { id: animProcess }
+  function animations(off) {
+    if (animProcess.running) animProcess.running = false
+    if (off) {
+      animProcess.command = ["bash", "-c",
+        "[ -f \"$1\" ] || hyprctl getoption animations:enabled | head -1 | grep -o 'true\\|false' > \"$1\"; " +
+        "hyprctl eval 'hl.config({ animations = { enabled = false } })' >/dev/null",
+        "_", root.animStateFile]
+    } else {
+      animProcess.command = ["bash", "-c",
+        "orig=$(cat \"$1\" 2>/dev/null); rm -f \"$1\"; " +
+        "hyprctl eval \"hl.config({ animations = { enabled = ${orig:-true} } })\" >/dev/null",
+        "_", root.animStateFile]
+    }
+    animProcess.running = true
+  }
+  readonly property string animStateFile: Quickshell.env("XDG_RUNTIME_DIR") + "/caption-buttons-anim"
+
+  // Safety net: never leave animations off if a gesture ends abnormally.
+  Timer {
+    interval: 5000
+    repeat: true
+    running: root.dragAddress === "" && root.animOriginal === "off"
+    onTriggered: { root.animOriginal = ""; root.animations(false) }
+  }
+
   // fx/fy: frozen surface position (monitor-local); mx/my: pointer in surface.
   function dragPress(info, fx, fy, mx, my) {
     root.dragCtx = { info: info, fx: fx, fy: fy, mx: mx, my: my, wx: info.winX, wy: info.winY,
@@ -625,6 +688,8 @@ Item {
     root.ghostY = root.pendingY - (d.info.bar ? root.barH : 0)
     if (!root.dragMoved && Math.abs(mx - d.mx) + Math.abs(my - d.my) > 6) {
       root.dragMoved = true
+      root.animOriginal = "off"
+      root.animations(true)
       root.beginMove(d)
     }
     var gx = d.info.monX + d.fx + mx, gy = d.info.monY + d.fy + my
@@ -654,6 +719,10 @@ Item {
     root.dragAddress = ""
     root.dragCtx = null
     root.ghostInfo = null
+    if (root.animOriginal === "off") {
+      root.animOriginal = ""
+      root.animations(false)
+    }
     if (zone) root.applySnap(d.info, zone, gx, gy)
     Qt.callLater(root.poll)
   }

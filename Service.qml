@@ -281,7 +281,7 @@ Item {
     // While a window is being dragged its surfaces must stay exactly as they
     // are: recreating one (for instance when the window crosses to the other
     // monitor) would drop the pointer grab and the release would never arrive.
-    var held = root.dragAddress
+    var held = root.dragAddress !== "" ? root.dragAddress : root.settling
     if (held !== "") {
       var keep = function(list) { return list.filter(function(e) { return e.address === held }) }
       var drop = function(list) { return list.filter(function(e) { return e.address !== held }) }
@@ -457,6 +457,9 @@ Item {
   property real ghostW: 0
   property string ghostMon: ""
   property var ghostInfo: null
+  // Address of a window that was just dropped: its bar stays hidden (and the
+  // follower stays put) until the compositor and our next poll agree.
+  property string settling: ""
 
   function flyoutRect(mon) {
     var a = root.workArea(mon)
@@ -724,20 +727,45 @@ Item {
     root.snapZone = root.zoneAt(gx, gy)
   }
 
+  Timer {
+    id: settleTimer
+    interval: 380
+    onTriggered: {
+      root.settling = ""
+      root.ghostInfo = null
+      root.dragMoved = false
+      root.poll()
+    }
+  }
+
   function dragRelease(mx, my) {
     var d = root.dragCtx
     if (!d) return
     var gx = d.info.monX + d.fx + mx
     var gy = d.info.monY + d.fy + my
     var zone = root.zoneAt(gx, gy)
-    if (!zone && root.dragMoved && root.dragReady) root.moveTo(d.info.address, root.pendingX, root.pendingY)
+    var moved = root.dragMoved
+    if (!zone && moved && root.dragReady) root.moveTo(d.info.address, root.pendingX, root.pendingY)
     root.snapZone = null
     root.flyoutMon = ""
     root.hoverCell = -1
     root.hoverZone = -1
     root.dragAddress = ""
     root.dragCtx = null
-    root.ghostInfo = null
+    if (moved) {
+      // Keep the follower where the window is about to land and hide the real
+      // bar until the layout has caught up, so nothing flashes at the old spot.
+      root.settling = d.info.address
+      if (zone) {
+        root.ghostX = zone.x
+        root.ghostY = zone.y - (zone.maximize ? 0 : 0)
+        root.ghostW = zone.w
+        if (zone.mon) root.ghostMon = zone.mon
+      }
+      settleTimer.restart()
+    } else {
+      root.ghostInfo = null
+    }
     // Let the final move/snap land without animation, then bring them back.
     if (root.animOriginal === "off") animRestoreTimer.restart()
     if (zone) root.applySnap(d.info, zone, gx, gy)
@@ -774,7 +802,7 @@ Item {
 
       TopRounded {
         anchors.fill: parent
-        opacity: bar.dragging && root.dragMoved ? 0 : 1
+        opacity: (bar.dragging && root.dragMoved) || root.settling === bar.modelData.address ? 0 : 1
         fill: Qt.rgba(root.cBg.r, root.cBg.g, root.cBg.b, root.barAlpha)
 
         Rectangle {
@@ -838,7 +866,7 @@ Item {
   // The real titlebar surface is frozen while it holds the pointer grab, so a
   // visual-only copy follows the window live.
   Instantiator {
-    model: ScriptModel { values: root.ghostInfo && root.ghostInfo.bar && root.dragMoved ? [root.ghostInfo] : []; objectProp: "address" }
+    model: ScriptModel { values: root.ghostInfo && root.ghostInfo.bar && (root.dragMoved || root.settling !== "") ? [root.ghostInfo] : []; objectProp: "address" }
 
     delegate: PanelWindow {
       id: ghost

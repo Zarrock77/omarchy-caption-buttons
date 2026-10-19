@@ -7,7 +7,7 @@ stock bar or any replacement bar (floating bar, etc.).
 | Control | Action |
 |---------|--------|
 | `⠿` grip | Drag to move the window (it is floated first). Drop it on a screen edge to **snap** |
-| `—` | Minimize to a special workspace; restore from the shelf chip (bottom-left) |
+| `—` | Minimize to a special workspace; click the app in your dock to bring it back |
 | `▢` / `❐` | Toggle Hyprland's maximized mode |
 | `✕` | Close |
 | `◢` (bottom-right) | Drag to resize |
@@ -41,8 +41,8 @@ omarchy plugin remove io.github.zarrock77.caption-buttons --yes
 - Requires Omarchy with Hyprland's Lua dispatcher API and `hyprctl` on `PATH`.
 - Buttons are hidden for true-fullscreen windows, windows narrower than 260 px, and when a
   more recently focused window covers them.
-- Minimized windows live on `special:caption-minimized`. Any tool that focuses a window on that
-  workspace should move it back first; the shelf chips do this for you.
+- Minimized windows live on `special:caption-minimized`. There is no on-screen shelf: restore a minimized window from your dock (the dock must move it
+  back to a normal workspace before focusing it) or with your own keybinding.
 
 ## License
 

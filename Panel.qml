@@ -10,7 +10,7 @@ import qs.Commons
 // Caption Buttons: a small pill of window controls on every Hyprland window.
 //
 //   ⠿  grip      drag to move; drop on a screen edge/corner to snap
-//   —  minimize  parks the window on a special workspace, listed on the shelf
+//   —  minimize  parks the window on a special workspace; click its dock icon to bring it back
 //   ▢  maximize  toggles Hyprland's "maximized" mode
 //   ✕  close
 //   ◢  bottom-right grip resizes the window
@@ -35,7 +35,6 @@ Item {
   property var monitors: []
   property var pills: []
   property var handles: []
-  property var parked: []
   property var homes: ({})
 
   // Active drag/resize gesture. The pill's layer surface stays frozen in place
@@ -120,15 +119,9 @@ Item {
 
   function rebuild() {
     var visible = []
-    var shelf = []
     for (var i = 0; i < root.clients.length; i++) {
       var c = root.clients[i]
-      if (!c.mapped || c.hidden && c.workspace.name !== root.parkedWorkspace) continue
-      if (c.workspace.name === root.parkedWorkspace) {
-        var pm = root.monitorById(c.monitor)
-        shelf.push({ address: c.address, cls: c.class || c.initialClass || "window", title: c.title, mon: pm ? pm.name : "" })
-        continue
-      }
+      if (!c.mapped || c.hidden) continue
       if (c.workspace.id < 0) continue
       var mon = root.monitorById(c.monitor)
       if (!mon || mon.activeWorkspace.id !== c.workspace.id || !root.screenByName(mon.name)) continue
@@ -167,7 +160,6 @@ Item {
     }
     root.pills = nextPills
     root.handles = nextHandles
-    root.parked = shelf
   }
 
   // --------------------------------------------------------------- actions
@@ -195,17 +187,6 @@ Item {
 
   function closeWindow(info) {
     dispatch("hl.dsp.window.close({ " + target(info.address) + " })")
-  }
-
-  function restore(entry) {
-    var ws = root.homes[entry.address]
-    if (ws === undefined) {
-      var m = root.monitorByName(entry.mon)
-      ws = m ? m.activeWorkspace.id : 1
-    }
-    dispatch("hl.dsp.window.move({ workspace = " + ws + ", follow = true, " + target(entry.address) + " })")
-    Qt.callLater(function() { root.dispatch("hl.dsp.focus({ " + root.target(entry.address) + " })") })
-    Qt.callLater(root.poll)
   }
 
   // ------------------------------------------------------------------ snap
@@ -509,75 +490,6 @@ Item {
         color: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18)
         border.width: 2
         border.color: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.7)
-      }
-    }
-  }
-
-  // -------------------------------------------------------- minimized shelf
-
-  Instantiator {
-    model: Quickshell.screens
-
-    delegate: PanelWindow {
-      id: shelf
-      required property var modelData
-      readonly property var entries: root.parked.filter(function(p) { return p.mon === shelf.modelData.name })
-
-      screen: modelData
-      visible: entries.length > 0
-      color: "transparent"
-      exclusionMode: ExclusionMode.Ignore
-      WlrLayershell.layer: WlrLayer.Top
-      WlrLayershell.namespace: "caption-buttons-shelf"
-      anchors { bottom: true; left: true }
-      margins { left: 12; bottom: 12 }
-      implicitWidth: row.implicitWidth + 12
-      implicitHeight: 38
-
-      Rectangle {
-        anchors.fill: parent
-        radius: 10
-        color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.9)
-        border.width: 1
-        border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.18)
-
-        Row {
-          id: row
-          anchors.centerIn: parent
-          spacing: 6
-
-          Repeater {
-            model: shelf.entries
-
-            delegate: Rectangle {
-              id: chip
-              required property var modelData
-              width: Math.min(160, label.implicitWidth + 22)
-              height: 26
-              radius: 7
-              color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, chipArea.containsMouse ? 0.22 : 0.1)
-
-              Text {
-                id: label
-                anchors.centerIn: parent
-                width: parent.width - 16
-                elide: Text.ElideRight
-                horizontalAlignment: Text.AlignHCenter
-                text: chip.modelData.cls
-                color: Color.foreground
-                font.pixelSize: 12
-              }
-
-              MouseArea {
-                id: chipArea
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.restore(chip.modelData)
-              }
-            }
-          }
-        }
       }
     }
   }

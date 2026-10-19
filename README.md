@@ -68,6 +68,7 @@ A pin icon (󰐃) is added to your bar. Click it to open the settings popup:
 - enable/disable the plugin
 - show/hide each button (minimize, maximize, close) and the resize grip
 - pill position (top right / top left), size and opacity
+- titlebar corner radius
 - snap on/off, edge sensitivity and gap
 
 Settings are stored in `~/.config/omarchy/caption-buttons.json` and apply instantly. You can

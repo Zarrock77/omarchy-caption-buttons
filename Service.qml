@@ -74,6 +74,7 @@ Item {
     corner: "top-right",
     scale: 100,
     opacity: 88,
+    cornerRadius: 6,
     snap: true,
     snapLayouts: true,
     snapEdge: 20,
@@ -685,11 +686,10 @@ Item {
       implicitWidth: Math.max(1, Math.round(bar.modelData.segW))
       implicitHeight: root.barH
 
-      Rectangle {
+      TopRounded {
         anchors.fill: parent
         opacity: bar.dragging && root.dragMoved ? 0 : 1
-        color: Qt.rgba(root.cBg.r, root.cBg.g, root.cBg.b, root.barAlpha)
-        border.width: 0
+        fill: Qt.rgba(root.cBg.r, root.cBg.g, root.cBg.b, root.barAlpha)
 
         Rectangle {
           anchors.bottom: parent.bottom
@@ -776,9 +776,9 @@ Item {
       implicitHeight: root.barH
       mask: Region {}
 
-      Rectangle {
+      TopRounded {
         anchors.fill: parent
-        color: Qt.rgba(root.cBg.r, root.cBg.g, root.cBg.b, root.barAlpha)
+        fill: Qt.rgba(root.cBg.r, root.cBg.g, root.cBg.b, root.barAlpha)
 
         Rectangle {
           anchors.bottom: parent.bottom
@@ -898,6 +898,28 @@ Item {
         }
       }
     }
+  }
+
+  // Rectangle with only its top corners rounded.
+  component TopRounded: Item {
+    id: shape
+    property color fill: "black"
+    default property alias content: holder.data
+    readonly property real r: Math.min(root.cfg.cornerRadius, height)
+
+    Rectangle {
+      anchors.fill: parent
+      radius: shape.r
+      color: shape.fill
+    }
+    Rectangle {
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.bottom: parent.bottom
+      height: parent.height - shape.r
+      color: shape.fill
+    }
+    Item { id: holder; anchors.fill: parent }
   }
 
   component CaptionButton: Item {

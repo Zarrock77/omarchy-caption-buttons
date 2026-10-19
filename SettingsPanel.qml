@@ -23,7 +23,7 @@ Panel {
   readonly property string configPath: Quickshell.env("HOME") + "/.config/omarchy/caption-buttons.json"
   readonly property var defaults: ({
     enabled: true, titlebar: true, showTitle: true, minimize: true, maximize: true, close: true, resizeHandle: true,
-    corner: "top-right", scale: 100, opacity: 88, snap: true, snapLayouts: true, snapEdge: 20, snapGap: 8
+    corner: "top-right", scale: 100, opacity: 88, cornerRadius: 6, snap: true, snapLayouts: true, snapEdge: 20, snapGap: 8
   })
   property var values: root.defaults
 
@@ -163,6 +163,15 @@ Panel {
           value: root.values.opacity
           onMoved: root.editing = true
           onReleased: function(value) { root.editing = false; root.set("opacity", Math.round(value)) }
+        }
+
+        Text { text: "Corner radius: " + root.values.cornerRadius + " px"; color: root.fg; font.family: root.font; font.pixelSize: Style.font.body; textFormat: Text.PlainText }
+        PanelSlider {
+          width: parent.width; bar: root.bar
+          minimum: 0; maximum: 16; step: 1; integer: true
+          value: root.values.cornerRadius
+          onMoved: root.editing = true
+          onReleased: function(value) { root.editing = false; root.set("cornerRadius", Math.round(value)) }
         }
 
         PanelSeparator { width: parent.width; foreground: root.fg }

@@ -263,7 +263,20 @@ Item {
   function moveTo(address, x, y) { dispatch("hl.dsp.window.move({ x = " + Math.round(x) + ", y = " + Math.round(y) + ", " + target(address) + " })") }
   function resizeTo(address, w, h) { dispatch("hl.dsp.window.resize({ x = " + Math.round(w) + ", y = " + Math.round(h) + ", exact = true, " + target(address) + " })") }
   function resizeBy(address, dx, dy) { dispatch("hl.dsp.window.resize({ x = " + Math.round(dx) + ", y = " + Math.round(dy) + ", relative = true, " + target(address) + " })") }
-  function focusWindow(address) { dispatch("hl.dsp.focus({ " + target(address) + " })") }
+  // Focusing a window warps the cursor to its centre; switch warping off for
+  // the duration of the dispatch so clicking a titlebar leaves the pointer alone.
+  Process { id: focusProcess }
+  function focusWindow(address) {
+    if (focusProcess.running) return
+    var win = "address:" + address
+    focusProcess.command = ["bash", "-c",
+      "orig=$(hyprctl getoption cursor:no_warps | head -1 | grep -o 'true\\|false'); " +
+      "hyprctl eval 'hl.config({ cursor = { no_warps = true } })' >/dev/null; " +
+      "hyprctl dispatch \"hl.dsp.focus({ window = \\\"$1\\\" })\" >/dev/null; sleep 0.15; " +
+      "hyprctl eval \"hl.config({ cursor = { no_warps = ${orig:-false} } })\" >/dev/null",
+      "_", win]
+    focusProcess.running = true
+  }
 
   function minimize(info) {
     var next = Object.assign({}, root.homes)

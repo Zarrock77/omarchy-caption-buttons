@@ -2,15 +2,23 @@
   "schemaVersion": 1,
   "id": "io.github.zarrock77.caption-buttons",
   "name": "Caption Buttons",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Zarrock77",
   "license": "MIT",
   "homepage": "https://github.com/Zarrock77/omarchy-caption-buttons",
-  "description": "Windows-style caption buttons on every Hyprland window: minimize, maximize, close, drag-to-snap and a resize grip. Works with any bar.",
-  "kinds": ["panel"],
+  "description": "Windows-style caption buttons on every Hyprland window: minimize, maximize, close, drag-to-snap and a resize grip, with a settings popup in the bar. Works with any bar.",
+  "kinds": ["service", "bar-widget"],
   "keepLoaded": true,
   "entryPoints": {
-    "panel": "Panel.qml"
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Caption Buttons",
+    "description": "Pin icon that opens the Caption Buttons settings",
+    "category": "Windows",
+    "allowMultiple": false,
+    "defaultSection": "right"
   },
   "tags": ["hyprland", "quickshell", "windows", "snap"]
 }

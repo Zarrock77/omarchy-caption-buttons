@@ -24,12 +24,54 @@ Item {
   property var manifest: null
 
   readonly property string parkedWorkspace: "special:caption-minimized"
-  readonly property int pillW: 112
-  readonly property int pillH: 26
+  readonly property string configPath: Quickshell.env("HOME") + "/.config/omarchy/caption-buttons.json"
   readonly property int edgeInset: 6
-  readonly property int snapEdge: 20
-  readonly property int snapGap: 8
   readonly property int minWindowW: 260
+
+  readonly property var defaults: ({
+    enabled: true,
+    minimize: true,
+    maximize: true,
+    close: true,
+    resizeHandle: true,
+    corner: "top-right",
+    scale: 100,
+    opacity: 88,
+    snap: true,
+    snapEdge: 20,
+    snapGap: 8
+  })
+  property var cfg: root.defaults
+
+  readonly property real uiScale: Math.max(0.6, Math.min(2, cfg.scale / 100))
+  readonly property int buttonSize: Math.round(26 * uiScale)
+  readonly property int buttonCount: 1 + (cfg.minimize ? 1 : 0) + (cfg.maximize ? 1 : 0) + (cfg.close ? 1 : 0)
+  readonly property int pillW: buttonSize * buttonCount + 4
+  readonly property int pillH: buttonSize
+  readonly property int snapEdge: cfg.snapEdge
+  readonly property int snapGap: cfg.snapGap
+  readonly property real pillAlpha: Math.max(0.2, Math.min(1, cfg.opacity / 100))
+
+  function mergeConfig(text) {
+    var next = Object.assign({}, root.defaults)
+    try {
+      var parsed = JSON.parse(text)
+      for (var key in root.defaults)
+        if (parsed[key] !== undefined && typeof parsed[key] === typeof root.defaults[key]) next[key] = parsed[key]
+    } catch (error) {}
+    root.cfg = next
+    root.rebuild()
+  }
+
+  FileView {
+    id: configFile
+    path: root.configPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.mergeConfig(text())
+    onFileChanged: configFile.reload()
+    onLoadFailed: root.mergeConfig("{}")
+  }
 
   property var clients: []
   property var monitors: []
@@ -118,6 +160,11 @@ Item {
   }
 
   function rebuild() {
+    if (!root.cfg.enabled) {
+      root.pills = []
+      root.handles = []
+      return
+    }
     var visible = []
     for (var i = 0; i < root.clients.length; i++) {
       var c = root.clients[i]
@@ -135,7 +182,7 @@ Item {
       var m = visible[v].mon
       if (w.fullscreen === 2 || w.size[0] < root.minWindowW || w.size[1] < 120) continue
 
-      var px = w.at[0] + w.size[0] - root.pillW - root.edgeInset
+      var px = root.cfg.corner === "top-left" ? w.at[0] + root.edgeInset : w.at[0] + w.size[0] - root.pillW - root.edgeInset
       var py = w.at[1] + root.edgeInset
       var hx = w.at[0] + w.size[0] - 18
       var hy = w.at[1] + w.size[1] - 18
@@ -156,7 +203,7 @@ Item {
         wsId: w.workspace.id, monX: m.x, monY: m.y
       }
       nextPills.push(Object.assign({ px: px - m.x, py: py - m.y, show: !coveredPill }, base))
-      nextHandles.push(Object.assign({ px: hx - m.x, py: hy - m.y, show: !coveredHandle && w.fullscreen !== 1 }, base))
+      nextHandles.push(Object.assign({ px: hx - m.x, py: hy - m.y, show: root.cfg.resizeHandle && !coveredHandle && w.fullscreen !== 1 }, base))
     }
     root.pills = nextPills
     root.handles = nextHandles
@@ -199,6 +246,7 @@ Item {
   }
 
   function snapFor(gx, gy) {
+    if (!root.cfg.snap) return null
     var mon = root.monitorAt(gx, gy)
     if (!mon) return null
     var a = root.workArea(mon)
@@ -284,7 +332,7 @@ Item {
       Rectangle {
         anchors.fill: parent
         radius: 8
-        color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.88)
+        color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, root.pillAlpha)
         border.width: 1
         border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.18)
 
@@ -294,7 +342,7 @@ Item {
 
           // Drag grip (also the snap handle)
           Item {
-            width: 26
+            width: root.buttonSize
             height: parent.height
 
             Text {
@@ -302,7 +350,7 @@ Item {
               text: "⠿"
               color: Color.foreground
               opacity: grip.pressed || grip.containsMouse ? 1 : 0.6
-              font.pixelSize: 15
+              font.pixelSize: Math.round(15 * root.uiScale)
             }
 
             MouseArea {
@@ -349,9 +397,9 @@ Item {
             }
           }
 
-          CaptionButton { glyph: "—"; onActivated: root.minimize(pill.modelData) }
-          CaptionButton { glyph: pill.modelData.maxed ? "❐" : "▢"; onActivated: root.toggleMaximize(pill.modelData) }
-          CaptionButton { glyph: "✕"; danger: true; onActivated: root.closeWindow(pill.modelData) }
+          CaptionButton { visible: root.cfg.minimize; glyph: "—"; onActivated: root.minimize(pill.modelData) }
+          CaptionButton { visible: root.cfg.maximize; glyph: pill.modelData.maxed ? "❐" : "▢"; onActivated: root.toggleMaximize(pill.modelData) }
+          CaptionButton { visible: root.cfg.close; glyph: "✕"; danger: true; onActivated: root.closeWindow(pill.modelData) }
         }
       }
     }
@@ -363,7 +411,7 @@ Item {
     property bool danger: false
     signal activated()
 
-    width: 26
+    width: visible ? root.buttonSize : 0
     height: parent ? parent.height : 22
 
     Rectangle {
@@ -378,7 +426,7 @@ Item {
       anchors.centerIn: parent
       text: button.glyph
       color: area.containsMouse && button.danger ? Color.urgent : Color.foreground
-      font.pixelSize: 13
+      font.pixelSize: Math.round(13 * root.uiScale)
     }
 
     MouseArea {

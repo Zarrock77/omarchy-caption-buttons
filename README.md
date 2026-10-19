@@ -24,10 +24,23 @@ While dragging by the grip, a preview shows where the window will land when rele
 Zones use the monitor's work area, so bars and reserved space are respected, and they
 work across monitors.
 
+## Settings
+
+A pin icon (󰐃) is added to your bar. Click it to open the settings popup:
+
+- enable/disable the plugin
+- show/hide each button (minimize, maximize, close) and the resize grip
+- pill position (top right / top left), size and opacity
+- snap on/off, edge sensitivity and gap
+
+Settings are stored in `~/.config/omarchy/caption-buttons.json` and apply instantly. You can
+also edit that file by hand.
+
 ## Install
 
 ```sh
 omarchy plugin add https://github.com/Zarrock77/omarchy-caption-buttons.git --enable
+omarchy bar put io.github.zarrock77.caption-buttons --section right
 ```
 
 ## Remove

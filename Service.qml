@@ -373,9 +373,10 @@ Item {
   function zoneAt(gx, gy) {
     root.hoverCell = -1
     root.hoverZone = -1
+    if (!root.dragMoved) return null
     var mon = root.monitorAt(gx, gy)
     if (!mon) return null
-    if (root.cfg.snapLayouts && root.dragMoved) {
+    if (root.cfg.snapLayouts) {
       var fr = root.flyoutRect(mon)
       var lx = gx - fr.x - root.flyPad, ly = gy - fr.y - root.flyPad
       if (gx >= fr.x && gx < fr.x + fr.w && gy >= fr.y && gy < fr.y + fr.h) {
@@ -429,21 +430,67 @@ Item {
     repeat: true
     running: root.dragAddress !== ""
     onTriggered: {
-      if (!root.pendingDirty || root.dragAddress === "") return
+      if (!root.pendingDirty || root.dragAddress === "" || !root.dragReady) return
       root.pendingDirty = false
       root.moveTo(root.dragAddress, root.pendingX, root.pendingY)
     }
   }
 
+  // A maximized window must be un-maximized before it can move. Like Windows it
+  // comes back at a "normal" size, positioned so the pointer keeps its place
+  // along the titlebar; the gesture waits for the compositor to catch up.
+  property bool dragReady: true
+
+  Timer {
+    id: restoreTimer
+    interval: 110
+    onTriggered: {
+      var d = root.dragCtx
+      if (!d) return
+      var info = d.info
+      var mon = root.monitorByName(info.mon)
+      if (!mon) { root.dragReady = true; return }
+      var a = root.workArea(mon)
+      var offset = info.bar ? root.barH : 0
+      var w = Math.max(640, Math.round(a.w * 0.6))
+      var h = Math.max(420, Math.round(a.h * 0.7))
+      var ratio = info.winW > 0 ? d.mx / info.winW : 0.5
+      var x = d.gx0 - ratio * w
+      var y = d.gy0 - (info.bar ? d.my : 12) + offset
+      x = Math.max(a.x, Math.min(a.x + a.w - w, x))
+      y = Math.max(a.y + offset, y)
+      if (!info.floating) root.floatOn(info.address)
+      root.resizeTo(info.address, w, h)
+      root.moveTo(info.address, x, y)
+      d.wx = x
+      d.wy = y
+      root.pendingDirty = false
+      root.dragReady = true
+    }
+  }
+
   // fx/fy: frozen surface position (monitor-local); mx/my: pointer in surface.
   function dragPress(info, fx, fy, mx, my) {
-    root.dragCtx = { info: info, fx: fx, fy: fy, mx: mx, my: my, wx: info.winX, wy: info.winY }
+    root.dragCtx = { info: info, fx: fx, fy: fy, mx: mx, my: my, wx: info.winX, wy: info.winY,
+                     gx0: info.monX + fx + mx, gy0: info.monY + fy + my }
     root.dragAddress = info.address
     root.pendingDirty = false
     root.dragMoved = false
     root.focusWindow(info.address)
-    if (info.maxed) root.unmaximize(info.address)
-    if (!info.floating) root.floatOn(info.address)
+    // Nothing moves until the pointer travels a few pixels, so a plain click
+    // or double-click on a maximized titlebar leaves the window alone.
+    root.dragReady = false
+  }
+
+  function beginMove(d) {
+    var info = d.info
+    if (info.maxed) {
+      root.unmaximize(info.address)
+      restoreTimer.restart()
+    } else {
+      if (!info.floating) root.floatOn(info.address)
+      root.dragReady = true
+    }
   }
 
   function dragMove(mx, my) {
@@ -452,7 +499,10 @@ Item {
     root.pendingX = d.wx + (mx - d.mx)
     root.pendingY = d.wy + (my - d.my)
     root.pendingDirty = true
-    if (!root.dragMoved && Math.abs(mx - d.mx) + Math.abs(my - d.my) > 6) root.dragMoved = true
+    if (!root.dragMoved && Math.abs(mx - d.mx) + Math.abs(my - d.my) > 6) {
+      root.dragMoved = true
+      root.beginMove(d)
+    }
     var gx = d.info.monX + d.fx + mx, gy = d.info.monY + d.fy + my
     var mon = root.monitorAt(gx, gy)
     root.flyoutMon = root.dragMoved && root.cfg.snapLayouts && mon ? mon.name : ""
@@ -465,7 +515,7 @@ Item {
     var gx = d.info.monX + d.fx + mx
     var gy = d.info.monY + d.fy + my
     var zone = root.zoneAt(gx, gy)
-    if (!zone) root.moveTo(d.info.address, root.pendingX, root.pendingY)
+    if (!zone && root.dragMoved && root.dragReady) root.moveTo(d.info.address, root.pendingX, root.pendingY)
     root.snapZone = null
     root.flyoutMon = ""
     root.hoverCell = -1

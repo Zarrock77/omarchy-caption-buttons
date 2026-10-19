@@ -7,16 +7,18 @@ import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
 
-// Caption Buttons: a small pill of window controls on every Hyprland window.
+// Caption Buttons.
 //
-//   ⠿  grip      drag to move; drop on a screen edge/corner to snap
-//   —  minimize  parks the window on a special workspace; click its dock icon to bring it back
-//   ▢  maximize  toggles Hyprland's "maximized" mode
-//   ✕  close
-//   ◢  bottom-right grip resizes the window
+// Titlebar mode (default): every window lives in a one-window Hyprland group.
+// The group makes Hyprland reserve a strip above the window; the native
+// groupbar is made invisible (see the README) and this plugin draws a real
+// titlebar there: title on the left, minimize / maximize / close on the right,
+// drag the bar to move (drop on an edge to snap), double-click to maximize.
+//
+// Overlay mode: a small pill of buttons floats over the window's corner.
 //
 // State comes from `hyprctl`, actions go back through Hyprland Lua dispatchers,
-// so the plugin needs nothing from the bar and works with any of them.
+// so the plugin works with any bar.
 Item {
   id: root
 
@@ -27,9 +29,13 @@ Item {
   readonly property string configPath: Quickshell.env("HOME") + "/.config/omarchy/caption-buttons.json"
   readonly property int edgeInset: 6
   readonly property int minWindowW: 260
+  // Strip reserved by Hyprland: groupbar height (26) + indicator (1).
+  readonly property int barH: 27
 
   readonly property var defaults: ({
     enabled: true,
+    titlebar: true,
+    showTitle: true,
     minimize: true,
     maximize: true,
     close: true,
@@ -50,7 +56,18 @@ Item {
   readonly property int pillH: buttonSize
   readonly property int snapEdge: cfg.snapEdge
   readonly property int snapGap: cfg.snapGap
-  readonly property real pillAlpha: Math.max(0.2, Math.min(1, cfg.opacity / 100))
+  readonly property real barAlpha: Math.max(0.2, Math.min(1, cfg.opacity / 100))
+
+  property var clients: []
+  property var monitors: []
+  property var pills: []
+  property var bars: []
+  property var handles: []
+  property var homes: ({})
+  property var groupRequests: ({})
+
+  property string dragAddress: ""
+  property var snapZone: null
 
   function mergeConfig(text) {
     var next = Object.assign({}, root.defaults)
@@ -72,17 +89,6 @@ Item {
     onFileChanged: configFile.reload()
     onLoadFailed: root.mergeConfig("{}")
   }
-
-  property var clients: []
-  property var monitors: []
-  property var pills: []
-  property var handles: []
-  property var homes: ({})
-
-  // Active drag/resize gesture. The pill's layer surface stays frozen in place
-  // while the gesture runs so pointer coordinates stay stable.
-  property string dragAddress: ""
-  property var snapZone: null
 
   // ---------------------------------------------------------------- polling
 
@@ -134,9 +140,7 @@ Item {
   function logicalSize(mon) {
     var scale = mon.scale > 0 ? mon.scale : 1
     var rotated = mon.transform % 2 === 1
-    var w = (rotated ? mon.height : mon.width) / scale
-    var h = (rotated ? mon.width : mon.height) / scale
-    return { w: w, h: h }
+    return { w: (rotated ? mon.height : mon.width) / scale, h: (rotated ? mon.width : mon.height) / scale }
   }
 
   function monitorAt(gx, gy) {
@@ -160,53 +164,93 @@ Item {
   }
 
   function rebuild() {
-    if (!root.cfg.enabled) {
-      root.pills = []
-      root.handles = []
-      return
-    }
     var visible = []
     for (var i = 0; i < root.clients.length; i++) {
       var c = root.clients[i]
-      if (!c.mapped || c.hidden) continue
-      if (c.workspace.id < 0) continue
+      if (!c.mapped || c.hidden || c.workspace.id < 0) continue
       var mon = root.monitorById(c.monitor)
       if (!mon || mon.activeWorkspace.id !== c.workspace.id || !root.screenByName(mon.name)) continue
       visible.push({ c: c, mon: mon })
     }
 
+    // Titlebar mode keeps every normal window in a one-window group (and
+    // undoes that when the mode is switched off).
+    root.syncGroups(visible)
+
+    if (!root.cfg.enabled) {
+      root.pills = []
+      root.bars = []
+      root.handles = []
+      return
+    }
+
     var nextPills = []
+    var nextBars = []
     var nextHandles = []
     for (var v = 0; v < visible.length; v++) {
       var w = visible[v].c
       var m = visible[v].mon
       if (w.fullscreen === 2 || w.size[0] < root.minWindowW || w.size[1] < 120) continue
 
+      var grouped = w.grouped && w.grouped.length === 1
+      var useBar = root.cfg.titlebar && grouped
       var px = root.cfg.corner === "top-left" ? w.at[0] + root.edgeInset : w.at[0] + w.size[0] - root.pillW - root.edgeInset
       var py = w.at[1] + root.edgeInset
+      var bx = w.at[0]
+      var by = w.at[1] - root.barH
       var hx = w.at[0] + w.size[0] - 18
       var hy = w.at[1] + w.size[1] - 18
 
       // Hide anything covered by a window that was focused more recently.
-      var coveredPill = false
-      var coveredHandle = false
+      var coveredPill = false, coveredBar = false, coveredHandle = false
       for (var k = 0; k < visible.length; k++) {
         var o = visible[k].c
         if (o === w || o.focusHistoryID >= w.focusHistoryID) continue
-        if (root.overlaps(px, py, root.pillW, root.pillH, o.at[0], o.at[1], o.size[0], o.size[1])) coveredPill = true
-        if (root.overlaps(hx, hy, 16, 16, o.at[0], o.at[1], o.size[0], o.size[1])) coveredHandle = true
+        var oy = o.at[1] - (o.grouped && o.grouped.length === 1 && root.cfg.titlebar ? root.barH : 0)
+        var oh = o.size[1] + (o.at[1] - oy)
+        if (root.overlaps(px, py, root.pillW, root.pillH, o.at[0], oy, o.size[0], oh)) coveredPill = true
+        if (root.overlaps(bx, by, w.size[0], root.barH, o.at[0], oy, o.size[0], oh)) coveredBar = true
+        if (root.overlaps(hx, hy, 16, 16, o.at[0], oy, o.size[0], oh)) coveredHandle = true
       }
 
       var base = {
         address: w.address, mon: m.name, floating: w.floating, maxed: w.fullscreen === 1,
         winX: w.at[0], winY: w.at[1], winW: w.size[0], winH: w.size[1],
-        wsId: w.workspace.id, monX: m.x, monY: m.y
+        wsId: w.workspace.id, monX: m.x, monY: m.y,
+        cls: w.class || w.initialClass || "", title: w.title || w.class || "",
+        focused: w.focusHistoryID === 0, bar: useBar
       }
-      nextPills.push(Object.assign({ px: px - m.x, py: py - m.y, show: !coveredPill }, base))
+      if (useBar) nextBars.push(Object.assign({ px: bx - m.x, py: by - m.y, show: !coveredBar }, base))
+      else nextPills.push(Object.assign({ px: px - m.x, py: py - m.y, show: !coveredPill }, base))
       nextHandles.push(Object.assign({ px: hx - m.x, py: hy - m.y, show: root.cfg.resizeHandle && !coveredHandle && w.fullscreen !== 1 }, base))
     }
     root.pills = nextPills
+    root.bars = nextBars
     root.handles = nextHandles
+  }
+
+  // One-window groups ------------------------------------------------------
+
+  function syncGroups(visible) {
+    var now = Date.now()
+    var requests = Object.assign({}, root.groupRequests)
+    for (var i = 0; i < visible.length; i++) {
+      var w = visible[i].c
+      var members = w.grouped ? w.grouped.length : 0
+      if (root.cfg.enabled && root.cfg.titlebar) {
+        // Needs a group, and nobody asked for one in the last second.
+        if (members === 0 && w.fullscreen !== 2 && !(requests[w.address] > now - 1000)) {
+          requests[w.address] = now
+          root.dispatch("hl.dsp.group.toggle({ " + root.target(w.address) + " })")
+          Qt.callLater(root.poll)
+        }
+      } else if (members === 1 && requests[w.address] !== undefined) {
+        delete requests[w.address]
+        root.dispatch("hl.dsp.group.toggle({ " + root.target(w.address) + " })")
+        Qt.callLater(root.poll)
+      }
+    }
+    root.groupRequests = requests
   }
 
   // --------------------------------------------------------------- actions
@@ -219,6 +263,7 @@ Item {
   function moveTo(address, x, y) { dispatch("hl.dsp.window.move({ x = " + Math.round(x) + ", y = " + Math.round(y) + ", " + target(address) + " })") }
   function resizeTo(address, w, h) { dispatch("hl.dsp.window.resize({ x = " + Math.round(w) + ", y = " + Math.round(h) + ", exact = true, " + target(address) + " })") }
   function resizeBy(address, dx, dy) { dispatch("hl.dsp.window.resize({ x = " + Math.round(dx) + ", y = " + Math.round(dy) + ", relative = true, " + target(address) + " })") }
+  function focusWindow(address) { dispatch("hl.dsp.focus({ " + target(address) + " })") }
 
   function minimize(info) {
     var next = Object.assign({}, root.homes)
@@ -238,10 +283,9 @@ Item {
 
   // ------------------------------------------------------------------ snap
 
-  // Work area of a monitor in layout coordinates, minus bars/reserved edges.
   function workArea(mon) {
     var s = root.logicalSize(mon)
-    var r = mon.reserved || [0, 0, 0, 0] // left, top, right, bottom
+    var r = mon.reserved || [0, 0, 0, 0]
     return { x: mon.x + r[0], y: mon.y + r[1], w: s.w - r[0] - r[2], h: s.h - r[1] - r[3] }
   }
 
@@ -268,25 +312,27 @@ Item {
     return zone
   }
 
-  function applySnap(address, zone, gx, gy) {
+  function applySnap(info, zone, gx, gy) {
+    var offset = info.bar ? root.barH : 0
     if (zone.maximize) {
-      root.moveTo(address, gx - 120, gy - 12)
-      Qt.callLater(function() { root.dispatch("hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"set\", layout_aware = false, " + root.target(address) + " })") })
+      root.moveTo(info.address, gx - 120, gy - 12 + offset)
+      Qt.callLater(function() { root.dispatch("hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"set\", layout_aware = false, " + root.target(info.address) + " })") })
     } else {
-      root.resizeTo(address, zone.w, zone.h)
-      root.moveTo(address, zone.x, zone.y)
+      // The zone covers bar + window, so the client area starts below the bar.
+      root.resizeTo(info.address, zone.w, zone.h - offset)
+      root.moveTo(info.address, zone.x, zone.y + offset)
     }
     Qt.callLater(root.poll)
   }
 
-  // ------------------------------------------------------------ move queue
+  // ------------------------------------------------------- drag gestures
 
   property real pendingX: 0
   property real pendingY: 0
   property bool pendingDirty: false
+  property var dragCtx: null
 
   Timer {
-    id: moveTimer
     interval: 16
     repeat: true
     running: root.dragAddress !== ""
@@ -297,7 +343,128 @@ Item {
     }
   }
 
-  // ---------------------------------------------------------------- pills
+  // fx/fy: frozen surface position (monitor-local); mx/my: pointer in surface.
+  function dragPress(info, fx, fy, mx, my) {
+    root.dragCtx = { info: info, fx: fx, fy: fy, mx: mx, my: my, wx: info.winX, wy: info.winY }
+    root.dragAddress = info.address
+    root.pendingDirty = false
+    root.focusWindow(info.address)
+    if (info.maxed) root.unmaximize(info.address)
+    if (!info.floating) root.floatOn(info.address)
+  }
+
+  function dragMove(mx, my) {
+    var d = root.dragCtx
+    if (!d) return
+    root.pendingX = d.wx + (mx - d.mx)
+    root.pendingY = d.wy + (my - d.my)
+    root.pendingDirty = true
+    root.snapZone = root.snapFor(d.info.monX + d.fx + mx, d.info.monY + d.fy + my)
+  }
+
+  function dragRelease(mx, my) {
+    var d = root.dragCtx
+    if (!d) return
+    var gx = d.info.monX + d.fx + mx
+    var gy = d.info.monY + d.fy + my
+    var zone = root.snapFor(gx, gy)
+    if (!zone) root.moveTo(d.info.address, root.pendingX, root.pendingY)
+    root.snapZone = null
+    root.dragAddress = ""
+    root.dragCtx = null
+    if (zone) root.applySnap(d.info, zone, gx, gy)
+    Qt.callLater(root.poll)
+  }
+
+  // ------------------------------------------------------------- titlebars
+
+  Instantiator {
+    model: ScriptModel { values: root.bars; objectProp: "address" }
+
+    delegate: PanelWindow {
+      id: bar
+      required property var modelData
+      readonly property bool dragging: root.dragAddress === modelData.address
+      readonly property color fg: Color.foreground
+      property real frozenX: 0
+      property real frozenY: 0
+      property bool frozen: false
+
+      screen: root.screenByName(modelData.mon)
+      visible: modelData.show || dragging
+      color: "transparent"
+      exclusionMode: ExclusionMode.Ignore
+      WlrLayershell.layer: WlrLayer.Top
+      WlrLayershell.namespace: "caption-buttons-titlebar"
+      anchors { top: true; left: true }
+      margins {
+        left: Math.max(0, Math.round(bar.frozen ? bar.frozenX : bar.modelData.px))
+        top: Math.max(0, Math.round(bar.frozen ? bar.frozenY : bar.modelData.py))
+      }
+      implicitWidth: Math.max(1, bar.modelData.winW)
+      implicitHeight: root.barH
+
+      Rectangle {
+        anchors.fill: parent
+        color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, root.barAlpha)
+        border.width: 0
+
+        Rectangle {
+          anchors.bottom: parent.bottom
+          width: parent.width
+          height: 1
+          color: Qt.rgba(bar.fg.r, bar.fg.g, bar.fg.b, bar.modelData.focused ? 0.28 : 0.12)
+        }
+
+        MouseArea {
+          id: dragArea
+          anchors.fill: parent
+          preventStealing: true
+          cursorShape: Qt.ArrowCursor
+          onPressed: function(mouse) {
+            bar.frozenX = bar.modelData.px
+            bar.frozenY = bar.modelData.py
+            bar.frozen = true
+            root.dragPress(bar.modelData, bar.frozenX, bar.frozenY, mouse.x, mouse.y)
+          }
+          onPositionChanged: function(mouse) { if (dragArea.pressed) root.dragMove(mouse.x, mouse.y) }
+          onReleased: function(mouse) {
+            root.dragRelease(mouse.x, mouse.y)
+            bar.frozen = false
+          }
+          onDoubleClicked: root.toggleMaximize(bar.modelData)
+        }
+
+        Text {
+          visible: root.cfg.showTitle
+          anchors.left: parent.left
+          anchors.leftMargin: 10
+          anchors.right: buttons.left
+          anchors.rightMargin: 8
+          anchors.verticalCenter: parent.verticalCenter
+          elide: Text.ElideRight
+          text: bar.modelData.title
+          textFormat: Text.PlainText
+          color: bar.fg
+          opacity: bar.modelData.focused ? 0.95 : 0.55
+          font.pixelSize: Math.round(12 * root.uiScale)
+        }
+
+        Row {
+          id: buttons
+          anchors.right: parent.right
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
+
+          CaptionButton { visible: root.cfg.minimize; glyph: "—"; onActivated: root.minimize(bar.modelData) }
+          CaptionButton { visible: root.cfg.maximize; glyph: bar.modelData.maxed ? "❐" : "▢"; onActivated: root.toggleMaximize(bar.modelData) }
+          CaptionButton { visible: root.cfg.close; glyph: "✕"; danger: true; onActivated: root.closeWindow(bar.modelData) }
+        }
+      }
+    }
+  }
+
+  // ----------------------------------------------------------- overlay pill
 
   Instantiator {
     model: ScriptModel { values: root.pills; objectProp: "address" }
@@ -309,13 +476,8 @@ Item {
       property real frozenX: 0
       property real frozenY: 0
       property bool frozen: false
-      property real pressX: 0
-      property real pressY: 0
-      property real winStartX: 0
-      property real winStartY: 0
 
-      readonly property var targetScreen: root.screenByName(modelData.mon)
-      screen: targetScreen
+      screen: root.screenByName(modelData.mon)
       visible: modelData.show || dragging
       color: "transparent"
       exclusionMode: ExclusionMode.Ignore
@@ -332,7 +494,7 @@ Item {
       Rectangle {
         anchors.fill: parent
         radius: 8
-        color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, root.pillAlpha)
+        color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, root.barAlpha)
         border.width: 1
         border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.18)
 
@@ -340,7 +502,6 @@ Item {
           anchors.fill: parent
           anchors.margins: 2
 
-          // Drag grip (also the snap handle)
           Item {
             width: root.buttonSize
             height: parent.height
@@ -359,40 +520,16 @@ Item {
               hoverEnabled: true
               preventStealing: true
               cursorShape: Qt.SizeAllCursor
-
               onPressed: function(mouse) {
-                var info = pill.modelData
-                pill.frozenX = info.px
-                pill.frozenY = info.py
+                pill.frozenX = pill.modelData.px
+                pill.frozenY = pill.modelData.py
                 pill.frozen = true
-                pill.pressX = mouse.x
-                pill.pressY = mouse.y
-                pill.winStartX = info.winX
-                pill.winStartY = info.winY
-                root.dragAddress = info.address
-                root.pendingDirty = false
-                if (info.maxed) root.unmaximize(info.address)
-                if (!info.floating) root.floatOn(info.address)
+                root.dragPress(pill.modelData, pill.frozenX, pill.frozenY, mouse.x, mouse.y)
               }
-              onPositionChanged: function(mouse) {
-                if (!grip.pressed) return
-                var info = pill.modelData
-                root.pendingX = pill.winStartX + (mouse.x - pill.pressX)
-                root.pendingY = pill.winStartY + (mouse.y - pill.pressY)
-                root.pendingDirty = true
-                root.snapZone = root.snapFor(info.monX + pill.frozenX + mouse.x, info.monY + pill.frozenY + mouse.y)
-              }
+              onPositionChanged: function(mouse) { if (grip.pressed) root.dragMove(mouse.x, mouse.y) }
               onReleased: function(mouse) {
-                var info = pill.modelData
-                var gx = info.monX + pill.frozenX + mouse.x
-                var gy = info.monY + pill.frozenY + mouse.y
-                var zone = root.snapFor(gx, gy)
-                if (!zone) root.moveTo(info.address, root.pendingX, root.pendingY)
-                root.snapZone = null
-                root.dragAddress = ""
+                root.dragRelease(mouse.x, mouse.y)
                 pill.frozen = false
-                if (zone) root.applySnap(info.address, zone, gx, gy)
-                Qt.callLater(root.poll)
               }
             }
           }
@@ -453,8 +590,7 @@ Item {
       property real lastY: 0
       property bool active: false
 
-      readonly property var targetScreen: root.screenByName(modelData.mon)
-      screen: targetScreen
+      screen: root.screenByName(modelData.mon)
       visible: modelData.show || active
       color: "transparent"
       exclusionMode: ExclusionMode.Ignore
@@ -490,7 +626,6 @@ Item {
           handle.active = true
           handle.lastX = mouse.x
           handle.lastY = mouse.y
-          if (!handle.modelData.floating) return
         }
         onPositionChanged: function(mouse) {
           if (!resizeArea.pressed) return

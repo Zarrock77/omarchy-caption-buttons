@@ -4,6 +4,35 @@ A tiny [Omarchy](https://omarchy.org) shell plugin that gives every Hyprland win
 Windows-style caption buttons. It does not depend on the bar, so it works with the
 stock bar or any replacement bar (floating bar, etc.).
 
+## Titlebar mode (default)
+
+Every window gets a real titlebar above it, like Windows: title on the left, minimize / maximize /
+close on the right. Drag the bar to move the window (drop on an edge to snap), double-click to
+maximize. It can be switched off in the settings popup to get the small floating pill instead.
+
+Hyprland has no titlebars, so the plugin puts each window in a one-window group (which makes
+Hyprland reserve a strip above it) and draws the bar there. This needs the groupbar to be reserved
+but invisible; add this to `~/.config/hypr/looknfeel.lua`:
+
+```lua
+hl.config({
+  group = {
+    auto_group = false, -- new windows must not open as tabs of the focused one
+    groupbar = {
+      height = 26, gaps_in = 0, gaps_out = 0,
+      indicator_height = 1, indicator_gap = 0,
+      render_titles = false, gradients = true, keep_upper_gap = true,
+      col = { active = "rgba(00000000)", inactive = "rgba(00000000)" },
+    },
+  },
+})
+```
+
+The plugin expects a 27 px strip (26 + 1 indicator). Omarchy's group keybindings (Super+G etc.)
+are not meaningful in this mode.
+
+## Overlay mode
+
 | Control | Action |
 |---------|--------|
 | `⠿` grip | Drag to move the window (it is floated first). Drop it on a screen edge to **snap** |

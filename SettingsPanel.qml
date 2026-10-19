@@ -22,7 +22,7 @@ Panel {
   readonly property string font: root.bar ? root.bar.fontFamily : Style.font.family
   readonly property string configPath: Quickshell.env("HOME") + "/.config/omarchy/caption-buttons.json"
   readonly property var defaults: ({
-    enabled: true, minimize: true, maximize: true, close: true, resizeHandle: true,
+    enabled: true, titlebar: true, showTitle: true, minimize: true, maximize: true, close: true, resizeHandle: true,
     corner: "top-right", scale: 100, opacity: 88, snap: true, snapEdge: 20, snapGap: 8
   })
   property var values: root.defaults
@@ -89,6 +89,24 @@ Panel {
           onClicked: root.set("enabled", !root.values.enabled)
         }
 
+        Toggle {
+          width: parent.width
+          label: "Titlebar above windows"
+          description: "Reserve a bar above each window (uses single-window groups). Off = small floating pill"
+          checked: root.values.titlebar
+          foreground: root.fg
+          fontFamily: root.font
+          onClicked: root.set("titlebar", !root.values.titlebar)
+        }
+        Toggle {
+          width: parent.width
+          label: "Show window title"
+          checked: root.values.showTitle
+          foreground: root.fg
+          fontFamily: root.font
+          onClicked: root.set("showTitle", !root.values.showTitle)
+        }
+
         PanelSeparator { width: parent.width; foreground: root.fg }
         PanelSectionHeader { text: "Buttons"; foreground: root.fg; fontFamily: root.font }
 
@@ -117,7 +135,7 @@ Panel {
         PanelSeparator { width: parent.width; foreground: root.fg }
         PanelSectionHeader { text: "Appearance"; foreground: root.fg; fontFamily: root.font }
 
-        Text { text: "Position"; color: root.fg; font.family: root.font; font.pixelSize: Style.font.body; textFormat: Text.PlainText }
+        Text { text: "Pill position (overlay mode)"; color: root.fg; font.family: root.font; font.pixelSize: Style.font.body; textFormat: Text.PlainText }
         Dropdown {
           width: parent.width
           showLabel: false

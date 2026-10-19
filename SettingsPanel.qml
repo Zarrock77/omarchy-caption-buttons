@@ -18,8 +18,8 @@ Panel {
   property bool editing: false
 
   readonly property var barIdentity: hostWidget || root
-  readonly property color fg: root.bar ? root.bar.foreground : Color.foreground
-  readonly property string font: root.bar ? root.bar.fontFamily : Style.font.family
+  readonly property color fg: root.bar ? root.bar.foreground : "#cacccc"
+  readonly property string font: root.bar ? root.bar.fontFamily : "sans-serif"
   readonly property string configPath: Quickshell.env("HOME") + "/.config/omarchy/caption-buttons.json"
   readonly property var defaults: ({
     enabled: true, titlebar: true, showTitle: true, minimize: true, maximize: true, close: true, resizeHandle: true,
